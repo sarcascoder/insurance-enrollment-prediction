@@ -1,5 +1,8 @@
 # Insurance Enrollment Prediction
 
+[![CI](https://github.com/sarcascoder/insurance-enrollment-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/sarcascoder/insurance-enrollment-prediction/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 An end-to-end machine-learning pipeline that predicts whether an employee will
 opt in to a new voluntary insurance product, from census-style demographic and
 employment data.
@@ -24,6 +27,8 @@ employment data.
 | `src/api.py` | FastAPI service serving predictions from the saved model |
 | `tests/` | Pytest suite for data, preprocessing, and the API |
 | `report.md` | Findings: data observations, model choices, results, next steps |
+| `Dockerfile` | Containerised API (trains the model at build time) |
+| `.github/workflows/ci.yml` | CI: runs tests + a training smoke-test on every push |
 
 The preprocessing is bundled **inside** each model's `Pipeline`, so the fitted
 scaler/encoder are learned only on training folds (no leakage) and travel with
@@ -105,6 +110,14 @@ Endpoints:
 ### 5. Run the tests
 ```bash
 python -m pytest -q
+```
+
+### 6. Run the API in Docker (optional, bonus)
+The image trains the model at build time, so the container is self-contained.
+```bash
+docker build -t insurance-api .
+docker run -p 8000:8000 insurance-api
+# -> API at http://127.0.0.1:8000/docs
 ```
 
 ---

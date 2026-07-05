@@ -48,10 +48,12 @@ Enrollment rate broken down by category is the most revealing view:
 
 **Takeaway:** enrollment is driven mostly by `has_dependents`, `employment_type`,
 and `salary`. `gender`, `marital_status`, and `region` are essentially noise —
-their per-group rates barely move from the 61.7% base rate.
+their per-group rates barely move from the 61.7% base rate. (Section 5 confirms
+this quantitatively with permutation importance.)
 
-Figures generated for reference:
-`artifacts/enrollment_by_category.png`, `artifacts/numeric_distributions.png`.
+![Enrollment rate by category](artifacts/enrollment_by_category.png)
+
+![Numeric feature distributions by enrollment](artifacts/numeric_distributions.png)
 
 ---
 
@@ -90,6 +92,10 @@ optimising ROC-AUC (`src/train.py`):
 
 Selection rule: **best test ROC-AUC wins** and is saved to `models/model.joblib`.
 
+All models optimise ROC-AUC in cross-validation (robust to the class imbalance),
+and the linear/forest models use `class_weight="balanced"` so the 62/38 split
+doesn't bias them toward the majority class.
+
 ---
 
 ## 5. Evaluation results
@@ -102,8 +108,12 @@ Held-out test set (2,000 rows), from `artifacts/metrics.json`:
 | **Random Forest (selected)** | **1.000** | **1.000** | **1.000** | **1.000** | **1.000** |
 | HistGradientBoosting | 0.9995 | 1.000 | 0.999 | 1.000 | 1.000 |
 
-Diagnostic figures for the selected model:
-`artifacts/confusion_matrix.png`, `artifacts/roc_curve.png`.
+![ROC curve comparison](artifacts/roc_comparison.png)
+![Confusion matrix — Random Forest](artifacts/confusion_matrix.png)
+
+The ROC comparison is more telling than any single curve: the tree ensembles sit
+in the top-left corner (near-perfect), while Logistic Regression traces a strong
+but visibly imperfect 0.97-AUC curve.
 
 ### Why the tree models score ~perfectly (and why that's not leakage)
 This is the most important finding. I investigated the perfect scores rather than
@@ -128,6 +138,28 @@ boundary is a set of axis-aligned thresholds and interactions that a single
 linear boundary cannot represent — a textbook illustration of linear vs.
 tree-based model capacity.
 
+### Feature importance (which attributes actually matter)
+Permutation importance on the held-out test set (shuffle one feature, measure
+the drop in ROC-AUC) makes the model's reasoning explicit and confirms the EDA:
+
+![Permutation importance — Random Forest](artifacts/feature_importance.png)
+
+| Feature | Importance (mean ROC-AUC drop) |
+|---------|:------------------------------:|
+| `has_dependents` | 0.188 |
+| `employment_type` | 0.146 |
+| `salary` | 0.144 |
+| `age` | 0.077 |
+| `marital_status` | ~0 |
+| `region` | ~0 |
+| `gender` | 0.000 |
+| `tenure_years` | 0.000 |
+
+Only **four** features carry any signal, and `gender`, `marital_status`,
+`region`, and `tenure_years` are effectively **zero** — the model ignores them
+entirely. This is a clean, quantified confirmation of the EDA and means the same
+performance is achievable with a much smaller, cheaper-to-serve feature set.
+
 ---
 
 ## 6. Key takeaways
@@ -145,8 +177,9 @@ tree-based model capacity.
 
 ## 7. What I'd do next with more time
 
-1. **Interpretability** — SHAP values / permutation importance on the chosen
-   model to quantify each feature's contribution for stakeholders.
+1. **Deeper interpretability** — permutation importance is already included
+   (Section 5); next I'd add SHAP values for per-prediction, direction-of-effect
+   explanations that stakeholders can act on.
 2. **Calibration** — for a "likelihood of enrollment" product, calibrated
    probabilities matter more than hard labels; check a reliability curve and
    apply isotonic/Platt scaling if needed.
@@ -154,8 +187,9 @@ tree-based model capacity.
    false positives vs. false negatives rather than defaulting to 0.5.
 4. **Robustness to messier data** — the real world has missing values, typos in
    categoricals, and outliers; add imputation and stress-test the pipeline.
-5. **Drop the noise features** and confirm no performance loss — a simpler model
-   is cheaper to serve and easier to explain.
+5. **Drop the four zero-importance features** (`gender`, `marital_status`,
+   `region`, `tenure_years`) and confirm no performance loss — a simpler model is
+   cheaper to serve and easier to explain.
 6. **Stronger validation on real data** — nested CV and a temporal/holdout split
    to get an honest generalisation estimate once scores aren't saturated.
 7. **Productionisation** — containerise the API, add request logging and model
