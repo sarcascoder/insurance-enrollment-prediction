@@ -182,29 +182,51 @@ def main() -> None:
     joblib.dump(best_model, config.MODEL_PATH)
     print(f"Saved model -> {config.MODEL_PATH}")
 
-    # Save diagnostic figures for the report, using the best model.
+    y_true = y_test.to_numpy()
+
+    # --- Diagnostic figures for the report ------------------------------------
+    # 1. Confusion matrix for the selected model.
     y_pred = best_model.predict(X_test)
-    y_proba = best_model.predict_proba(X_test)[:, 1]
     evaluate.save_confusion_matrix(
-        y_test.to_numpy(), y_pred,
+        y_true, y_pred,
         config.ARTIFACTS_DIR / "confusion_matrix.png",
         title=f"Confusion matrix — {best_name}",
     )
-    evaluate.save_roc_curve(
-        y_test.to_numpy(), y_proba,
-        config.ARTIFACTS_DIR / "roc_curve.png",
-        title=f"ROC curve — {best_name}",
+
+    # 2. ROC comparison across ALL models on one axis (more informative than a
+    #    single, here near-perfect, curve).
+    curves, aucs = {}, {}
+    for name, model in fitted.items():
+        proba = model.predict_proba(X_test)[:, 1]
+        curves[name] = evaluate.roc_points(y_true, proba)
+        aucs[name] = results[name]["metrics"]["roc_auc"]
+    evaluate.save_roc_comparison(
+        curves, aucs, config.ARTIFACTS_DIR / "roc_comparison.png"
     )
 
-    # Save a machine-readable summary of every model for the report/README.
+    # 3. Permutation importance for the selected model (model-agnostic, on the
+    #    original feature columns) — answers "which attributes matter?".
+    print("\nComputing permutation importance (this can take a moment)...")
+    importance_df = evaluate.compute_permutation_importance(
+        best_model, X_test, y_test, random_state=config.RANDOM_STATE
+    )
+    evaluate.save_feature_importance(
+        importance_df,
+        config.ARTIFACTS_DIR / "feature_importance.png",
+        title=f"Permutation importance — {best_name}",
+    )
+    print(importance_df.to_string(index=False))
+
+    # --- Machine-readable summary for the report/README -----------------------
     summary = {
         "best_model": best_name,
         "feature_columns": config.FEATURE_COLUMNS,
         "results": results,
+        "permutation_importance": importance_df.to_dict(orient="records"),
     }
     with open(config.METRICS_PATH, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
-    print(f"Saved metrics -> {config.METRICS_PATH}")
+    print(f"\nSaved metrics -> {config.METRICS_PATH}")
 
 
 if __name__ == "__main__":
