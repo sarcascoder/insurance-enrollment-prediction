@@ -106,7 +106,10 @@ def tune_and_evaluate(
 ) -> tuple[Pipeline, dict[str, float], dict]:
     """Grid-search one candidate, log it to MLflow, and score it on the test set.
 
-    Returns the fitted best estimator, its test metrics, and the best params.
+    Returns the fitted best estimator, its test metrics, the best params, and the
+    cross-validated ROC-AUC (``grid.best_score_``). The CV score is what model
+    selection uses; the test metrics are reported afterwards as an *unbiased*
+    estimate, never used to pick the winner (that would double-dip the test set).
     """
     grid = GridSearchCV(
         estimator=spec["pipeline"],
@@ -135,7 +138,7 @@ def tune_and_evaluate(
         mlflow.sklearn.log_model(best_model, name="model")
 
     print(f"[{name}] cv_roc_auc={grid.best_score_:.4f} | test {evaluate.format_metrics(metrics)}")
-    return best_model, metrics, grid.best_params_
+    return best_model, metrics, grid.best_params_, float(grid.best_score_)
 
 
 def main() -> None:
@@ -166,17 +169,24 @@ def main() -> None:
 
     for name, spec in build_candidates().items():
         print(f"\n=== Tuning {name} ===")
-        model, metrics, params = tune_and_evaluate(
+        model, metrics, params, cv_score = tune_and_evaluate(
             name, spec, X_train, y_train, X_test, y_test
         )
-        results[name] = {"metrics": metrics, "best_params": params}
+        results[name] = {
+            "cv_roc_auc": cv_score,
+            "metrics": metrics,
+            "best_params": params,
+        }
         fitted[name] = model
 
-    # Select the best model by test ROC-AUC.
-    best_name = max(results, key=lambda n: results[n]["metrics"]["roc_auc"])
+    # Select the best model by CROSS-VALIDATED ROC-AUC (computed on training
+    # folds only). Selecting on the test set would bias the reported test score;
+    # here the test metrics stay a clean, unbiased estimate of the winner.
+    best_name = max(results, key=lambda n: results[n]["cv_roc_auc"])
     best_model = fitted[best_name]
-    print(f"\nBest model: {best_name} "
-          f"(ROC-AUC={results[best_name]['metrics']['roc_auc']:.4f})")
+    print(f"\nBest model (by CV ROC-AUC): {best_name} "
+          f"(cv={results[best_name]['cv_roc_auc']:.4f}, "
+          f"test={results[best_name]['metrics']['roc_auc']:.4f})")
 
     # Persist the winning pipeline for the API.
     joblib.dump(best_model, config.MODEL_PATH)

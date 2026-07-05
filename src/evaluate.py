@@ -20,7 +20,6 @@ import pandas as pd
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
-    RocCurveDisplay,
     accuracy_score,
     f1_score,
     precision_score,
@@ -60,20 +59,6 @@ def save_confusion_matrix(
         y_true, y_pred, display_labels=["Not enrolled", "Enrolled"], ax=ax, colorbar=False
     )
     ax.set_title(title)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=120)
-    plt.close(fig)
-
-
-def save_roc_curve(
-    y_true: np.ndarray, y_proba: np.ndarray, out_path: Path, title: str = "ROC curve"
-) -> None:
-    """Render and save a ROC curve figure."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(4.5, 4))
-    RocCurveDisplay.from_predictions(y_true, y_proba, ax=ax)
-    ax.set_title(title)
-    ax.plot([0, 1], [0, 1], linestyle="--", color="grey", linewidth=1)  # chance line
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
     plt.close(fig)

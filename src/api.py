@@ -14,7 +14,6 @@ attributes as JSON and applies the identical transformation used in training.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 import joblib
 import pandas as pd

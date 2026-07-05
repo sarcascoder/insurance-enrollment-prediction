@@ -72,7 +72,8 @@ This:
 - trains Logistic Regression, Random Forest, and HistGradientBoosting, each
   tuned with 5-fold cross-validated grid search,
 - logs every run to MLflow,
-- selects the best model by test ROC-AUC and saves it to `models/model.joblib`,
+- selects the best model by cross-validated ROC-AUC and saves it to
+  `models/model.joblib` (the test set is used only for the final report),
 - writes `artifacts/metrics.json`, a confusion matrix, and a ROC curve.
 
 ### 3. Inspect experiments in MLflow (optional, bonus)
@@ -124,11 +125,15 @@ docker run -p 8000:8000 insurance-api
 
 ## Results at a glance
 
-| Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|-------|:--------:|:---------:|:------:|:--:|:-------:|
-| Logistic Regression | 0.894 | 0.936 | 0.889 | 0.912 | 0.971 |
-| **Random Forest (selected)** | **1.000** | **1.000** | **1.000** | **1.000** | **1.000** |
-| HistGradientBoosting | 0.9995 | 1.000 | 0.999 | 1.000 | 1.000 |
+| Model | CV ROC-AUC | Test Accuracy | Test F1 | Test ROC-AUC |
+|-------|:----------:|:-------------:|:-------:|:------------:|
+| Logistic Regression | 0.9663 | 0.894 | 0.912 | 0.971 |
+| **Random Forest (selected)** | **1.0000** | **1.000** | **1.000** | **1.000** |
+| HistGradientBoosting | 0.99999769 | 0.9995 | 1.000 | 1.000 |
+
+The model is selected on **cross-validated** ROC-AUC (training folds only); the
+test set is reported afterwards as an unbiased estimate, never used for
+selection.
 
 The tree-based models separate this **synthetic** dataset almost perfectly
 because its target is a near-deterministic rule over `salary`,

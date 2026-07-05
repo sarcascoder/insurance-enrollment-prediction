@@ -12,6 +12,7 @@
   ],
   "results": {
     "logistic_regression": {
+      "cv_roc_auc": 0.9662801978358726,
       "metrics": {
         "accuracy": 0.894,
         "precision": 0.9360613810741688,
@@ -24,6 +25,7 @@
       }
     },
     "random_forest": {
+      "cv_roc_auc": 1.0,
       "metrics": {
         "accuracy": 1.0,
         "precision": 1.0,
@@ -38,6 +40,7 @@
       }
     },
     "hist_gradient_boosting": {
+      "cv_roc_auc": 0.9999976852489378,
       "metrics": {
         "accuracy": 0.9995,
         "precision": 1.0,
