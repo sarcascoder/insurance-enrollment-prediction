@@ -1,0 +1,80 @@
+{
+  "shape": [
+    10000,
+    10
+  ],
+  "target_balance": {
+    "1": 0.6174,
+    "0": 0.3826
+  },
+  "numeric_summary": {
+    "count": {
+      "age": 10000.0,
+      "salary": 10000.0,
+      "tenure_years": 10000.0
+    },
+    "mean": {
+      "age": 43.002,
+      "salary": 65032.967907,
+      "tenure_years": 3.96772
+    },
+    "std": {
+      "age": 12.2858003439,
+      "salary": 14923.9584463777,
+      "tenure_years": 3.8954883499
+    },
+    "min": {
+      "age": 22.0,
+      "salary": 2207.79,
+      "tenure_years": 0.0
+    },
+    "25%": {
+      "age": 33.0,
+      "salary": 54714.3425,
+      "tenure_years": 1.2
+    },
+    "50%": {
+      "age": 43.0,
+      "salary": 65056.05,
+      "tenure_years": 2.8
+    },
+    "75%": {
+      "age": 54.0,
+      "salary": 75053.6875,
+      "tenure_years": 5.6
+    },
+    "max": {
+      "age": 64.0,
+      "salary": 120312.0,
+      "tenure_years": 36.0
+    }
+  },
+  "enrollment_rate_by_category": {
+    "gender": {
+      "Other": 0.6427,
+      "Male": 0.6168,
+      "Female": 0.616
+    },
+    "marital_status": {
+      "Single": 0.6294,
+      "Widowed": 0.6248,
+      "Married": 0.6102,
+      "Divorced": 0.6004
+    },
+    "employment_type": {
+      "Full-time": 0.7533,
+      "Contract": 0.3124,
+      "Part-time": 0.2848
+    },
+    "region": {
+      "South": 0.6283,
+      "Midwest": 0.6174,
+      "West": 0.6127,
+      "Northeast": 0.6117
+    },
+    "has_dependents": {
+      "Yes": 0.7974,
+      "No": 0.3481
+    }
+  }
+}

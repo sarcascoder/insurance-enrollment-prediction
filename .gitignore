@@ -15,8 +15,9 @@ mlruns/
 mlartifacts/
 mlflow.db
 models/*.joblib
-artifacts/*.png
-artifacts/*.json
+# NOTE: artifacts/ (figures + metrics.json + eda_summary.json) ARE committed as
+# the canonical, reviewable results so report.md renders on GitHub without a
+# local run. They are deterministic (fixed seed).
 
 # OS / editor
 .DS_Store
