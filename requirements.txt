@@ -1,20 +1,20 @@
+# Runtime dependencies, pinned for reproducibility.
+# These exact versions produced the committed metrics.json and figures.
+# (Install dev/test tooling separately: pip install -r requirements-dev.txt)
+
 # Core data & modelling
-pandas>=2.2
-numpy>=1.26
-scikit-learn>=1.5
-joblib>=1.4
+pandas==2.3.3
+numpy==2.5.0
+scikit-learn==1.9.0
+joblib==1.5.3
 
 # Plots for EDA / evaluation figures
-matplotlib>=3.8
+matplotlib==3.11.0
 
 # Experiment tracking (bonus)
-mlflow>=2.14
+mlflow==3.14.0
 
 # REST API (bonus)
-fastapi>=0.110
-uvicorn[standard]>=0.29
-pydantic>=2.6
-
-# Testing
-pytest>=8.0
-httpx>=0.27
+fastapi==0.138.1
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
