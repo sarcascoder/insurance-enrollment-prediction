@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from enum import Enum
+from enum import StrEnum
 
 import joblib
 import pandas as pd
@@ -79,33 +79,33 @@ def _get_model():
 # Enums mirror the categories seen in training. They give the API automatic
 # validation and self-documenting Swagger dropdowns. Unknown categories would
 # still be handled gracefully by the encoder, but rejecting them early is safer.
-class Gender(str, Enum):
+class Gender(StrEnum):
     female = "Female"
     male = "Male"
     other = "Other"
 
 
-class MaritalStatus(str, Enum):
+class MaritalStatus(StrEnum):
     single = "Single"
     married = "Married"
     divorced = "Divorced"
     widowed = "Widowed"
 
 
-class EmploymentType(str, Enum):
+class EmploymentType(StrEnum):
     full_time = "Full-time"
     part_time = "Part-time"
     contract = "Contract"
 
 
-class Region(str, Enum):
+class Region(StrEnum):
     west = "West"
     midwest = "Midwest"
     northeast = "Northeast"
     south = "South"
 
 
-class HasDependents(str, Enum):
+class HasDependents(StrEnum):
     yes = "Yes"
     no = "No"
 
