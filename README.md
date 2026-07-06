@@ -20,18 +20,19 @@ employment data.
 |------|---------|
 | `src/config.py` | Central config: paths, feature groups, seeds, constants |
 | `src/data.py` | Load, validate, and stratified train/test split |
-| `src/preprocess.py` | `ColumnTransformer` — scale numerics, one-hot encode categoricals |
+| `src/preprocess.py` | `ColumnTransformer` — impute + scale numerics, impute + one-hot encode categoricals |
 | `src/eda.py` | Exploratory analysis → figures + `artifacts/eda_summary.json` |
-| `src/train.py` | Train 3 models, tune with grid search, track in MLflow, select & save best |
-| `src/evaluate.py` | Metrics (accuracy/precision/recall/F1/ROC-AUC) + confusion-matrix & ROC plots |
-| `src/api.py` | FastAPI service serving predictions from the saved model |
-| `tests/` | Pytest suite for data, preprocessing, and the API |
+| `src/train.py` | Dummy baseline + 3 models, tune with grid search, track in MLflow, select & save best |
+| `src/evaluate.py` | Metrics (acc/precision/recall/F1/ROC-AUC/PR-AUC/Brier) + confusion, ROC, PR, calibration, importance plots |
+| `src/api.py` | FastAPI service serving predictions (model loaded at startup) |
+| `tests/` | Pytest suite for data, preprocessing, evaluation, and the API |
 | `report.md` | Findings: data observations, model choices, results, next steps |
-| `Dockerfile` | Containerised API (trains the model at build time) |
-| `.github/workflows/ci.yml` | CI: runs tests + a training smoke-test on every push |
+| `Dockerfile` | Multi-stage, non-root containerised API |
+| `pyproject.toml` | Packaging + ruff/pytest config |
+| `.github/workflows/ci.yml` | CI: ruff lint + tests + training smoke-test on 3.10 & 3.12 |
 
-The preprocessing is bundled **inside** each model's `Pipeline`, so the fitted
-scaler/encoder are learned only on training folds (no leakage) and travel with
+The preprocessing (imputer → scaler/encoder) is bundled **inside** each model's
+`Pipeline`, so it is learned only on training folds (no leakage) and travels with
 the saved model — the API takes raw JSON and applies the identical transform.
 
 ---
@@ -108,13 +109,17 @@ Endpoints:
 > Run `python -m src.train` **before** starting the API so `models/model.joblib`
 > exists; otherwise `/predict` returns `503`.
 
-### 5. Run the tests
+### 5. Run the tests and linter
 ```bash
+pip install -r requirements-dev.txt   # pytest, httpx, ruff
 python -m pytest -q
+ruff check src/ tests/
 ```
 
 ### 6. Run the API in Docker (optional, bonus)
-The image trains the model at build time, so the container is self-contained.
+Multi-stage build: the model is trained in the builder stage and only the trained
+artifact + runtime are copied into a slim, non-root final image (no dataset or
+training DB baked in).
 ```bash
 docker build -t insurance-api .
 docker run -p 8000:8000 insurance-api
@@ -125,15 +130,17 @@ docker run -p 8000:8000 insurance-api
 
 ## Results at a glance
 
-| Model | CV ROC-AUC | Test Accuracy | Test F1 | Test ROC-AUC |
-|-------|:----------:|:-------------:|:-------:|:------------:|
-| Logistic Regression | 0.9663 | 0.894 | 0.912 | 0.971 |
-| **Random Forest (selected)** | **1.0000** | **1.000** | **1.000** | **1.000** |
-| HistGradientBoosting | 0.99999769 | 0.9995 | 1.000 | 1.000 |
+| Model | CV ROC-AUC | Test Acc | Test F1 | Test ROC-AUC | PR-AUC | Brier ↓ |
+|-------|:----------:|:--------:|:-------:|:------------:|:------:|:-------:|
+| Dummy (majority-class floor) | 0.5000 | 0.6175 | 0.764 | 0.5000 | 0.618 | 0.383 |
+| Logistic Regression | 0.9663 | 0.894 | 0.912 | 0.971 | 0.982 | 0.072 |
+| **Random Forest (selected)** | **1.0000** | **1.000** | **1.000** | **1.000** | **1.000** | 0.002 |
+| HistGradientBoosting | 0.99999769 | 0.9995 | 1.000 | 1.000 | 1.000 | 0.0005 |
 
-The model is selected on **cross-validated** ROC-AUC (training folds only); the
-test set is reported afterwards as an unbiased estimate, never used for
-selection.
+Every model clears the **0.6175 majority-class floor**. The model is selected on
+**cross-validated** ROC-AUC (training folds only); the test set is reported
+afterwards as an unbiased estimate, never used for selection. Brier score
+(probability calibration) and a PR curve are reported too — see `report.md`.
 
 The tree-based models separate this **synthetic** dataset almost perfectly
 because its target is a near-deterministic rule over `salary`,
@@ -145,5 +152,7 @@ flag on real data).
 
 ## Reproducibility
 
-Every stochastic step (split, model init, CV) uses a fixed seed
-(`config.RANDOM_STATE = 42`), so runs are deterministic.
+Runs are deterministic: every stochastic step (split, model init, CV) uses a
+fixed seed (`config.RANDOM_STATE = 42`), **and** all dependencies are pinned to
+exact versions in `requirements.txt`. Seed + locked environment together mean the
+committed `metrics.json` and figures reproduce bit-for-bit.

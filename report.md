@@ -16,8 +16,11 @@ Reproduce these with `python -m src.eda`.
 
 ### Quality
 - **No missing values**, **no duplicate `employee_id`s**, and **no conflicting
-  duplicate feature rows**. It is a clean synthetic dataset — no imputation was
-  needed.
+  duplicate feature rows** in the supplied CSV. The pipeline still ships with
+  median/most-frequent **imputation** anyway — the brief says the data mimics
+  real group-benefits enrollment, where missing salary/tenure/marital status are
+  the norm, and without imputers a single NaN would silently become a NaN
+  prediction. Robustness to the *stated domain*, not just the sample file.
 - `employee_id` is a pure identifier and is **dropped** before modelling; keeping
   it would invite memorisation of individual rows.
 
@@ -67,9 +70,10 @@ Implemented in `src/data.py` and `src/preprocess.py`:
    and test, keeping the held-out evaluation representative.
 3. **Preprocessing as a `ColumnTransformer`**, wrapped *inside* each model
    `Pipeline`:
-   - numeric (`age`, `salary`, `tenure_years`) → `StandardScaler`
+   - numeric (`age`, `salary`, `tenure_years`) → median impute → `StandardScaler`
    - categorical (`gender`, `marital_status`, `employment_type`, `region`,
-     `has_dependents`) → `OneHotEncoder(handle_unknown="ignore")`
+     `has_dependents`) → most-frequent impute →
+     `OneHotEncoder(handle_unknown="ignore")`
 
 **Why preprocessing lives inside the pipeline:** the scaler and encoder are fit
 only on the training folds during cross-validation — never on the test set — so
@@ -106,27 +110,51 @@ doesn't bias them toward the majority class.
 
 From `artifacts/metrics.json`. **CV ROC-AUC** (5-fold, training data) is the
 selection criterion; the remaining columns are the held-out test set (2,000
-rows), reported only *after* selection:
+rows), reported only *after* selection. The **Dummy** row (predict the majority
+class for everyone) is the no-skill floor every real model must beat:
 
-| Model | CV ROC-AUC | Test Accuracy | Test Precision | Test Recall | Test F1 | Test ROC-AUC |
-|-------|:----------:|:-------------:|:--------------:|:-----------:|:-------:|:------------:|
-| Logistic Regression | 0.9663 | 0.894 | 0.936 | 0.889 | 0.912 | 0.971 |
-| **Random Forest (selected)** | **1.0000** | **1.000** | **1.000** | **1.000** | **1.000** | **1.000** |
-| HistGradientBoosting | 0.99999769 | 0.9995 | 1.000 | 0.999 | 1.000 | 1.000 |
+| Model | CV ROC-AUC | Test Acc | Test F1 | Test ROC-AUC | Test PR-AUC | Brier ↓ |
+|-------|:----------:|:--------:|:-------:|:------------:|:-----------:|:-------:|
+| Dummy (most-frequent) | 0.5000 | 0.6175 | 0.764 | 0.5000 | 0.618 | 0.383 |
+| Logistic Regression | 0.9663 | 0.894 | 0.912 | 0.971 | 0.982 | 0.072 |
+| **Random Forest (selected)** | **1.0000** | **1.000** | **1.000** | **1.000** | **1.000** | **0.002** |
+| HistGradientBoosting | 0.99999769 | 0.9995 | 1.000 | 1.000 | 1.000 | **0.0005** |
 
-Random Forest and HistGradientBoosting are **effectively tied** — Random Forest
-wins by a ~2e-6 margin in CV ROC-AUC. That gap is far too small to call one
-genuinely "better"; on real data I'd break such a tie on secondary criteria
-(inference cost, calibration, interpretability), not the fourth decimal place.
-Both massively outperform the linear baseline because the target's decision
-boundary is a set of axis-aligned thresholds a single linear model can't capture.
+Reading the table:
+- **Every model beats the 0.6175 majority-class floor** — Logistic Regression by
+  +28 points of accuracy, the trees essentially perfectly. Without the Dummy row
+  a reader can't tell whether "89% accuracy" is impressive or trivial; here it's
+  clearly real signal.
+- **PR-AUC** (imbalance-aware) tells the same story as ROC-AUC, so the ROC numbers
+  aren't an artefact of the 62/38 split.
+- **Brier score** (lower = better-calibrated probabilities) is where the tie gets
+  interesting: Random Forest wins selection on CV ROC-AUC by a ~2e-6 margin, but
+  **HistGradientBoosting is actually the best-calibrated model** (Brier 0.0005 vs
+  0.0021). For a product that consumes a *likelihood*, that's exactly the kind of
+  secondary criterion I'd use to break a statistical tie — see below.
 
 ![ROC curve comparison](artifacts/roc_comparison.png)
+![Precision-Recall comparison](artifacts/pr_comparison.png)
 ![Confusion matrix — Random Forest](artifacts/confusion_matrix.png)
 
-The ROC comparison is more telling than any single curve: the tree ensembles sit
-in the top-left corner (near-perfect), while Logistic Regression traces a strong
-but visibly imperfect 0.97-AUC curve.
+The ROC/PR comparisons are more telling than any single curve: the tree ensembles
+sit in the top-left/top-right corners (near-perfect), while Logistic Regression
+traces a strong but visibly imperfect ~0.97 curve.
+
+### Calibration — do the probabilities mean what they say?
+The business wants a *likelihood* of enrollment, so probability quality matters as
+much as ranking. The reliability curves and Brier scores:
+
+![Calibration comparison](artifacts/calibration_comparison.png)
+
+On this **separable synthetic** data every model looks well-calibrated (the trees
+are almost always right *and* confident, so their 0/1 outputs land on the
+diagonal). **This is a data artefact, and I would not expect it to hold on real,
+noisy enrollment data**, where Random Forest's near-0/1 probabilities are
+notoriously over-confident. On a real deployment I'd (a) prefer the lower-Brier
+gradient-boosting model or (b) wrap the classifier in `CalibratedClassifierCV`
+(isotonic/Platt) and monitor the Brier score over time. Reporting Brier now,
+rather than only accuracy, is what surfaces this.
 
 ### Why the tree models score ~perfectly (and why that's not leakage)
 This is the most important finding. I investigated the perfect scores rather than
@@ -194,29 +222,38 @@ performance is achievable with a much smaller, cheaper-to-serve feature set.
 1. **Deeper interpretability** — permutation importance is already included
    (Section 5); next I'd add SHAP values for per-prediction, direction-of-effect
    explanations that stakeholders can act on.
-2. **Calibration** — for a "likelihood of enrollment" product, calibrated
-   probabilities matter more than hard labels; check a reliability curve and
-   apply isotonic/Platt scaling if needed.
+2. **Active calibration** — Brier scores and reliability curves are already
+   reported (Section 5); the next step is wrapping the classifier in
+   `CalibratedClassifierCV` and validating on real (noisy) data where the trees'
+   near-0/1 probabilities would need correcting.
 3. **Threshold selection** — tune the decision threshold to the business cost of
    false positives vs. false negatives rather than defaulting to 0.5.
-4. **Robustness to messier data** — the real world has missing values, typos in
-   categoricals, and outliers; add imputation and stress-test the pipeline.
+4. **Stress-test the imputation** — median/most-frequent imputers are in place;
+   with real data I'd validate them against typos in categoricals, outliers, and
+   missing-not-at-random patterns.
 5. **Drop the four zero-importance features** (`gender`, `marital_status`,
    `region`, `tenure_years`) and confirm no performance loss — a simpler model is
    cheaper to serve and easier to explain.
 6. **Stronger validation on real data** — nested CV and a temporal/holdout split
    to get an honest generalisation estimate once scores aren't saturated.
-7. **Productionisation** — containerise the API, add request logging and model
-   versioning, and wire the MLflow model registry into deployment.
+7. **Productionisation** — the API is already containerised (multi-stage,
+   non-root Docker) with CI; next I'd add request logging, drift monitoring, a
+   retraining trigger, and wire the MLflow model registry into deployment.
 
 ---
 
 ## Appendix — reproduce everything
 
+Every stochastic step uses a fixed seed (`config.RANDOM_STATE = 42`) **and**
+dependencies are pinned to exact versions in `requirements.txt`, so the numbers
+above and the committed figures reproduce bit-for-bit — reproducibility is seed
+*plus* a locked environment, not just the seed.
+
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime + test/lint tooling
 python -m src.eda        # EDA stats + figures
 python -m src.train      # train, tune, track (MLflow), select & save best
 python -m pytest -q      # tests
+ruff check src/ tests/   # lint
 uvicorn src.api:app      # serve predictions at /docs
 ```
