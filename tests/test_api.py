@@ -7,7 +7,6 @@ isolation and the suite stays fast.
 
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from sklearn.linear_model import LogisticRegression

@@ -12,6 +12,7 @@ is version-controlled, diff-able, and runs the same way in CI as on a laptop.
 from __future__ import annotations
 
 import json
+import logging
 
 import matplotlib
 
@@ -20,6 +21,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from . import config, data
+
+logger = logging.getLogger(__name__)
 
 
 def numeric_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -42,10 +45,9 @@ def enrollment_rate_by_category(df: pd.DataFrame) -> dict[str, pd.Series]:
 def plot_numeric_distributions(df: pd.DataFrame) -> None:
     """Histogram of each numeric feature split by enrollment outcome."""
     fig, axes = plt.subplots(1, len(config.NUMERIC_FEATURES), figsize=(14, 4))
-    for ax, col in zip(axes, config.NUMERIC_FEATURES):
+    for ax, col in zip(axes, config.NUMERIC_FEATURES, strict=True):
         for label, group in df.groupby(config.TARGET):
-            ax.hist(group[col], bins=30, alpha=0.55,
-                    label=f"enrolled={label}")
+            ax.hist(group[col], bins=30, alpha=0.55, label=f"enrolled={label}")
         ax.set_title(col)
         ax.set_xlabel(col)
         ax.legend()
@@ -54,14 +56,14 @@ def plot_numeric_distributions(df: pd.DataFrame) -> None:
     out = config.ARTIFACTS_DIR / "numeric_distributions.png"
     fig.savefig(out, dpi=120)
     plt.close(fig)
-    print(f"Saved {out}")
+    logger.info("Saved %s", out)
 
 
 def plot_enrollment_by_category(rates: dict[str, pd.Series]) -> None:
     """Bar chart of enrollment rate per category for every categorical feature."""
     n = len(rates)
     fig, axes = plt.subplots(1, n, figsize=(4 * n, 4))
-    for ax, (col, series) in zip(axes, rates.items()):
+    for ax, (col, series) in zip(axes, rates.items(), strict=True):
         series.plot(kind="bar", ax=ax)
         ax.set_title(col)
         ax.set_ylabel("enrollment rate")
@@ -72,29 +74,26 @@ def plot_enrollment_by_category(rates: dict[str, pd.Series]) -> None:
     out = config.ARTIFACTS_DIR / "enrollment_by_category.png"
     fig.savefig(out, dpi=120)
     plt.close(fig)
-    print(f"Saved {out}")
+    logger.info("Saved %s", out)
 
 
 def main() -> None:
     config.ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = data.validate(data.load_raw())
-    print(f"Dataset shape: {df.shape}")
+    logger.info("Dataset shape: %s", df.shape)
 
     # Target balance.
     balance = df[config.TARGET].value_counts(normalize=True).to_dict()
-    print(f"Target balance (enrolled): {balance}")
+    logger.info("Target balance (enrolled): %s", balance)
 
     # Numeric summary.
-    print("\nNumeric summary:")
-    print(numeric_summary(df))
+    logger.info("Numeric summary:\n%s", numeric_summary(df))
 
     # Category-level enrollment rates.
     rates = enrollment_rate_by_category(df)
-    print("\nEnrollment rate by category:")
     for col, series in rates.items():
-        print(f"\n{col}:")
-        print(series.round(3))
+        logger.info("Enrollment rate by %s:\n%s", col, series.round(3))
 
     # Persist a compact JSON summary for the report.
     summary = {
@@ -108,7 +107,7 @@ def main() -> None:
     out = config.ARTIFACTS_DIR / "eda_summary.json"
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
-    print(f"\nSaved {out}")
+    logger.info("Saved %s", out)
 
     # Figures.
     plot_numeric_distributions(df)
@@ -116,4 +115,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     main()

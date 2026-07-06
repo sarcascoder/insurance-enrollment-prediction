@@ -22,7 +22,7 @@ DATA_PATH: Path = PROJECT_ROOT / "data" / "employee_data.csv"
 # Output locations. These are created on demand by the scripts that write to
 # them, so they do not need to exist ahead of time.
 MODELS_DIR: Path = PROJECT_ROOT / "models"
-ARTIFACTS_DIR: Path = PROJECT_ROOT / "artifacts"      # figures, metrics, reports
+ARTIFACTS_DIR: Path = PROJECT_ROOT / "artifacts"  # figures, metrics, reports
 
 # MLflow tracking. Recent MLflow deprecated the plain-file store, so we use a
 # local SQLite database as the tracking backend (no server to run) and a plain
@@ -60,9 +60,9 @@ FEATURE_COLUMNS: list[str] = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 # --------------------------------------------------------------------------- #
 # Modelling constants
 # --------------------------------------------------------------------------- #
-RANDOM_STATE: int = 42          # fixed seed everywhere for reproducibility
-TEST_SIZE: float = 0.2          # 20% held out for the final test evaluation
-CV_FOLDS: int = 5               # folds for cross-validated hyperparameter search
+RANDOM_STATE: int = 42  # fixed seed everywhere for reproducibility
+TEST_SIZE: float = 0.2  # 20% held out for the final test evaluation
+CV_FOLDS: int = 5  # folds for cross-validated hyperparameter search
 
 # MLflow experiment name.
 EXPERIMENT_NAME: str = "insurance-enrollment"
