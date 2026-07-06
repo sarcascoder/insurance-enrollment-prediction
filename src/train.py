@@ -10,23 +10,29 @@ The script:
      preprocess -> classifier ``Pipeline``,
   3. tunes each with cross-validated grid search, logging every run to MLflow,
   4. evaluates the tuned models on the held-out test set,
-  5. picks the best model by ROC-AUC and saves it, plus metrics and figures,
-     for the API and the report to consume.
+  5. picks the best model by cross-validated ROC-AUC and saves it, plus metrics
+     and figures, for the API and the report to consume.
+
+A majority-class ``DummyClassifier`` is included as a no-skill baseline so every
+other model is judged against the trivial floor (predict "enrolled" for
+everyone).
 
 Wrapping preprocessing inside each Pipeline is what makes cross-validation and
-the saved artifact leak-free and self-contained: the scaler/encoder are refit on
-each training fold and travel with the model to inference time.
+the saved artifact leak-free and self-contained: the imputer/scaler/encoder are
+refit on each training fold and travel with the model to inference time.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 
 import joblib
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
@@ -34,6 +40,8 @@ from sklearn.pipeline import Pipeline
 
 from . import config, data, evaluate
 from .preprocess import build_preprocessor
+
+logger = logging.getLogger(__name__)
 
 
 def build_candidates() -> dict[str, dict]:
@@ -44,6 +52,8 @@ def build_candidates() -> dict[str, dict]:
     value without turning a take-home into an hours-long search.
 
     Model rationale:
+      - Dummy (most-frequent): the no-skill floor. Any real model must beat its
+        61.7% accuracy / 0.5 ROC-AUC to be worth anything.
       - Logistic Regression: fast, interpretable linear baseline. If a linear
         model already does well, that tells us the signal is mostly additive.
       - Random Forest: captures non-linearities and feature interactions with
@@ -51,12 +61,18 @@ def build_candidates() -> dict[str, dict]:
       - HistGradientBoosting: sklearn's boosted-trees implementation, usually
         the strongest tabular performer, and built in (no extra dependency).
     """
-    preprocessor = build_preprocessor()
 
     def pipe(clf) -> Pipeline:
-        return Pipeline(steps=[("preprocess", preprocessor), ("clf", clf)])
+        # Fresh preprocessor per pipeline: no shared mutable state between models.
+        return Pipeline(steps=[("preprocess", build_preprocessor()), ("clf", clf)])
 
     return {
+        "dummy_baseline": {
+            # No-skill reference. The most-frequent strategy ignores features, so
+            # it needs no preprocessing; an empty grid just cross-validates it.
+            "pipeline": Pipeline(steps=[("clf", DummyClassifier(strategy="most_frequent"))]),
+            "param_grid": {},
+        },
         "logistic_regression": {
             "pipeline": pipe(
                 LogisticRegression(
@@ -84,9 +100,7 @@ def build_candidates() -> dict[str, dict]:
             },
         },
         "hist_gradient_boosting": {
-            "pipeline": pipe(
-                HistGradientBoostingClassifier(random_state=config.RANDOM_STATE)
-            ),
+            "pipeline": pipe(HistGradientBoostingClassifier(random_state=config.RANDOM_STATE)),
             "param_grid": {
                 "clf__learning_rate": [0.05, 0.1],
                 "clf__max_depth": [None, 6],
@@ -114,7 +128,7 @@ def tune_and_evaluate(
     grid = GridSearchCV(
         estimator=spec["pipeline"],
         param_grid=spec["param_grid"],
-        scoring="roc_auc",          # optimise ranking quality, robust to imbalance
+        scoring="roc_auc",  # optimise ranking quality, robust to imbalance
         cv=config.CV_FOLDS,
         n_jobs=-1,
         refit=True,
@@ -135,9 +149,17 @@ def tune_and_evaluate(
         mlflow.log_metric("cv_best_roc_auc", float(grid.best_score_))
         for metric_name, value in metrics.items():
             mlflow.log_metric(f"test_{metric_name}", value)
-        mlflow.sklearn.log_model(best_model, name="model")
+        # cloudpickle (not the newer skops default) — skops rejects the
+        # numpy.dtype that SimpleImputer stores as an "untrusted type".
+        mlflow.sklearn.log_model(
+            best_model,
+            name="model",
+            serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+        )
 
-    print(f"[{name}] cv_roc_auc={grid.best_score_:.4f} | test {evaluate.format_metrics(metrics)}")
+    logger.info(
+        "[%s] cv_roc_auc=%.4f | test %s", name, grid.best_score_, evaluate.format_metrics(metrics)
+    )
     return best_model, metrics, grid.best_params_, float(grid.best_score_)
 
 
@@ -160,15 +182,15 @@ def main() -> None:
         )
     mlflow.set_experiment(config.EXPERIMENT_NAME)
 
-    print("Loading data...")
+    logger.info("Loading data...")
     X_train, X_test, y_train, y_test = data.get_train_test_split()
-    print(f"Train: {X_train.shape[0]} rows | Test: {X_test.shape[0]} rows")
+    logger.info("Train: %d rows | Test: %d rows", X_train.shape[0], X_test.shape[0])
 
     results: dict[str, dict] = {}
     fitted: dict[str, Pipeline] = {}
 
     for name, spec in build_candidates().items():
-        print(f"\n=== Tuning {name} ===")
+        logger.info("=== Tuning %s ===", name)
         model, metrics, params, cv_score = tune_and_evaluate(
             name, spec, X_train, y_train, X_test, y_test
         )
@@ -180,43 +202,66 @@ def main() -> None:
         fitted[name] = model
 
     # Select the best model by CROSS-VALIDATED ROC-AUC (computed on training
-    # folds only). Selecting on the test set would bias the reported test score;
-    # here the test metrics stay a clean, unbiased estimate of the winner.
-    best_name = max(results, key=lambda n: results[n]["cv_roc_auc"])
+    # folds only). The dummy baseline is excluded from selection — it exists only
+    # as a reference floor. Selecting on the test set would bias the reported
+    # test score; here the test metrics stay a clean, unbiased estimate.
+    selectable = {n: r for n, r in results.items() if n != "dummy_baseline"}
+    best_name = max(selectable, key=lambda n: selectable[n]["cv_roc_auc"])
     best_model = fitted[best_name]
-    print(f"\nBest model (by CV ROC-AUC): {best_name} "
-          f"(cv={results[best_name]['cv_roc_auc']:.4f}, "
-          f"test={results[best_name]['metrics']['roc_auc']:.4f})")
+    logger.info(
+        "Best model (by CV ROC-AUC): %s (cv=%.4f, test=%.4f) | baseline acc=%.4f",
+        best_name,
+        results[best_name]["cv_roc_auc"],
+        results[best_name]["metrics"]["roc_auc"],
+        results["dummy_baseline"]["metrics"]["accuracy"],
+    )
 
     # Persist the winning pipeline for the API.
     joblib.dump(best_model, config.MODEL_PATH)
-    print(f"Saved model -> {config.MODEL_PATH}")
+    logger.info("Saved model -> %s", config.MODEL_PATH)
 
     y_true = y_test.to_numpy()
+    positive_rate = float(y_true.mean())
+
+    # Probabilities for every real (non-baseline) model, reused across plots.
+    real_models = {n: m for n, m in fitted.items() if n != "dummy_baseline"}
+    probas = {n: m.predict_proba(X_test)[:, 1] for n, m in real_models.items()}
 
     # --- Diagnostic figures for the report ------------------------------------
     # 1. Confusion matrix for the selected model.
-    y_pred = best_model.predict(X_test)
     evaluate.save_confusion_matrix(
-        y_true, y_pred,
+        y_true,
+        best_model.predict(X_test),
         config.ARTIFACTS_DIR / "confusion_matrix.png",
         title=f"Confusion matrix — {best_name}",
     )
 
-    # 2. ROC comparison across ALL models on one axis (more informative than a
-    #    single, here near-perfect, curve).
-    curves, aucs = {}, {}
-    for name, model in fitted.items():
-        proba = model.predict_proba(X_test)[:, 1]
-        curves[name] = evaluate.roc_points(y_true, proba)
-        aucs[name] = results[name]["metrics"]["roc_auc"]
+    # 2. ROC comparison (more informative than a single, here near-perfect, curve).
     evaluate.save_roc_comparison(
-        curves, aucs, config.ARTIFACTS_DIR / "roc_comparison.png"
+        {n: evaluate.roc_points(y_true, p) for n, p in probas.items()},
+        {n: results[n]["metrics"]["roc_auc"] for n in real_models},
+        config.ARTIFACTS_DIR / "roc_comparison.png",
     )
 
-    # 3. Permutation importance for the selected model (model-agnostic, on the
+    # 3. Precision-Recall comparison — the imbalance-aware view.
+    evaluate.save_pr_comparison(
+        {n: evaluate.pr_points(y_true, p) for n, p in probas.items()},
+        {n: results[n]["metrics"]["pr_auc"] for n in real_models},
+        positive_rate,
+        config.ARTIFACTS_DIR / "pr_comparison.png",
+    )
+
+    # 4. Calibration (reliability) comparison — does the predicted probability
+    #    mean what it says? Critical because the product consumes a "likelihood".
+    evaluate.save_calibration_comparison(
+        {n: evaluate.calibration_points(y_true, p) for n, p in probas.items()},
+        {n: results[n]["metrics"]["brier"] for n in real_models},
+        config.ARTIFACTS_DIR / "calibration_comparison.png",
+    )
+
+    # 5. Permutation importance for the selected model (model-agnostic, on the
     #    original feature columns) — answers "which attributes matter?".
-    print("\nComputing permutation importance (this can take a moment)...")
+    logger.info("Computing permutation importance (this can take a moment)...")
     importance_df = evaluate.compute_permutation_importance(
         best_model, X_test, y_test, random_state=config.RANDOM_STATE
     )
@@ -225,7 +270,7 @@ def main() -> None:
         config.ARTIFACTS_DIR / "feature_importance.png",
         title=f"Permutation importance — {best_name}",
     )
-    print(importance_df.to_string(index=False))
+    logger.info("Permutation importance:\n%s", importance_df.to_string(index=False))
 
     # --- Machine-readable summary for the report/README -----------------------
     summary = {
@@ -236,8 +281,13 @@ def main() -> None:
     }
     with open(config.METRICS_PATH, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
-    print(f"\nSaved metrics -> {config.METRICS_PATH}")
+    logger.info("Saved metrics -> %s", config.METRICS_PATH)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     main()

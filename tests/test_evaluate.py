@@ -17,8 +17,18 @@ def test_compute_metrics_perfect_prediction():
     m = evaluate.compute_metrics(y_true, y_pred, y_proba)
     assert m["accuracy"] == 1.0
     assert m["roc_auc"] == 1.0
-    # Every metric is a plain float in [0, 1] (JSON-serialisable).
+    assert m["pr_auc"] == 1.0
+    # All headline metrics are reported, as JSON-serialisable floats in [0, 1].
+    assert set(m) == {"accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc", "brier"}
     assert all(isinstance(v, float) and 0.0 <= v <= 1.0 for v in m.values())
+
+
+def test_brier_rewards_calibrated_probabilities():
+    # Same correct ranking, but confident-and-right beats hedged predictions.
+    y_true = np.array([0, 1, 1, 0])
+    confident = evaluate.compute_metrics(y_true, y_true, np.array([0.02, 0.98, 0.99, 0.01]))
+    hedged = evaluate.compute_metrics(y_true, y_true, np.array([0.4, 0.6, 0.55, 0.45]))
+    assert confident["brier"] < hedged["brier"]
 
 
 def test_roc_points_shapes():
@@ -34,8 +44,7 @@ def test_permutation_importance_ranks_features(sample_df):
     X = sample_df[config.FEATURE_COLUMNS]
     y = sample_df[config.TARGET]
     model = Pipeline(
-        steps=[("preprocess", build_preprocessor()),
-               ("clf", LogisticRegression(max_iter=1000))]
+        steps=[("preprocess", build_preprocessor()), ("clf", LogisticRegression(max_iter=1000))]
     )
     model.fit(X, y)
 
