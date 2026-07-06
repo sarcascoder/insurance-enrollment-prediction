@@ -1,7 +1,7 @@
 # Insurance Enrollment Prediction
 
 [![CI](https://github.com/sarcascoder/insurance-enrollment-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/sarcascoder/insurance-enrollment-prediction/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 
 An end-to-end machine-learning pipeline that predicts whether an employee will
 opt in to a new voluntary insurance product, from census-style demographic and
@@ -29,7 +29,7 @@ employment data.
 | `report.md` | Findings: data observations, model choices, results, next steps |
 | `Dockerfile` | Multi-stage, non-root containerised API |
 | `pyproject.toml` | Packaging + ruff/pytest config |
-| `.github/workflows/ci.yml` | CI: ruff lint + tests + training smoke-test on 3.10 & 3.12 |
+| `.github/workflows/ci.yml` | CI: ruff lint + tests + training smoke-test on 3.12 & 3.13 |
 
 The preprocessing (imputer → scaler/encoder) is bundled **inside** each model's
 `Pipeline`, so it is learned only on training folds (no leakage) and travels with
@@ -39,7 +39,7 @@ the saved model — the API takes raw JSON and applies the identical transform.
 
 ## Setup
 
-Requires **Python 3.10+** (developed on 3.12).
+Requires **Python 3.12+** (the pinned `numpy`/`scikit-learn` versions need it).
 
 ```bash
 # 1. (recommended) create and activate a virtual environment
